@@ -1,89 +1,119 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "event_classification.schema.json",
-  "title": "EventClassification",
-  "description": "Вывод LLM-классификатора для одного события. vLLM ограничивает генерацию этой схемой.",
+  "title": "EventExtraction",
+  "description": "Вывод модели для одного текста: какое событие описано, о какой компании, с дословной цитатой. Оценок и рекомендаций нет. vLLM ограничивает генерацию этой схемой; после неё код проверяет цитату и ИНН.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "event_type",
-    "instruments",
-    "severity",
-    "action_required",
-    "action_type",
-    "deadline",
+    "company",
+    "related_companies",
     "summary",
-    "rationale",
+    "event_type",
+    "concerns",
+    "event_date",
+    "instruments",
+    "quote",
     "confidence"
   ],
   "properties": {
+    "company": {
+      "type": "object",
+      "description": "Компания, о чьём событии текст",
+      "additionalProperties": false,
+      "required": ["name", "inn"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 200 },
+        "inn": {
+          "type": ["string", "null"],
+          "description": "ИНН из текста; null, если в тексте его нет",
+          "pattern": "^([0-9]{10}|[0-9]{12})$"
+        }
+      }
+    },
+    "related_companies": {
+      "type": "array",
+      "description": "Связанные компании, если событие касается их: поручитель, дочерняя, материнская",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "inn", "relation"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 200 },
+          "inn": { "type": ["string", "null"], "pattern": "^([0-9]{10}|[0-9]{12})$" },
+          "relation": { "type": "string", "enum": ["guarantor", "subsidiary", "parent", "other"] }
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "description": "Что произошло — одна строка, только факт, без оценок",
+      "maxLength": 200
+    },
     "event_type": {
       "type": "string",
-      "description": "Тип события",
+      "description": "Тип события; правила разметки в docs/data.md",
       "enum": [
+        "coupon_rate_set",
         "coupon_payment",
-        "coupon_rate_change",
+        "payment_delay",
+        "default_declared",
         "put_offer",
         "call_offer",
         "redemption",
         "amortization",
-        "dividend",
-        "reporting",
-        "technical_default",
-        "default",
-        "restructuring",
+        "bondholders_meeting",
         "issue_terms_change",
-        "rating_change",
-        "delisting",
-        "corporate_action",
+        "restructuring",
+        "rating_upgrade",
+        "rating_downgrade",
+        "rating_affirmed",
+        "rating_withdrawn",
+        "rating_watch",
+        "bankruptcy_filing",
+        "reporting",
+        "asset_deal",
+        "management_change",
         "other"
       ]
     },
+    "concerns": {
+      "type": "object",
+      "description": "Чего касается событие — факт, не оценка",
+      "additionalProperties": false,
+      "required": ["payments", "rating", "terms"],
+      "properties": {
+        "payments": { "type": "boolean", "description": "Выплаты по долгу" },
+        "rating": { "type": "boolean", "description": "Кредитный рейтинг" },
+        "terms": { "type": "boolean", "description": "Условия выпуска" }
+      }
+    },
+    "event_date": {
+      "type": ["string", "null"],
+      "description": "Дата события из текста в формате YYYY-MM-DD; null, если её нет",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
     "instruments": {
       "type": "array",
-      "description": "Бумаги, которых касается событие",
-      "minItems": 1,
+      "description": "Выпуски, названные в тексте; может быть пустым",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["isin"],
         "properties": {
-          "isin": { "type": "string", "pattern": "^[A-Z]{2}[A-Z0-9]{9}[0-9]$" },
-          "ticker": { "type": ["string", "null"] }
+          "isin": { "type": ["string", "null"], "pattern": "^[A-Z]{2}[A-Z0-9]{9}[0-9]$" },
+          "series": { "type": ["string", "null"], "maxLength": 50 }
         }
       }
     },
-    "severity": {
+    "quote": {
       "type": "string",
-      "description": "Серьёзность для держателя бумаги",
-      "enum": ["low", "medium", "high", "critical"]
-    },
-    "action_required": {
-      "type": "boolean",
-      "description": "Нужно ли держателю что-то сделать"
-    },
-    "action_type": {
-      "type": ["string", "null"],
-      "description": "Тип возможного действия, null если действие не нужно",
-      "enum": ["submit_offer_order", "review_position", "set_stop", "watch", null]
-    },
-    "deadline": {
-      "type": ["string", "null"],
-      "description": "Крайний срок действия в формате YYYY-MM-DD, null если срока нет",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-    },
-    "summary": {
-      "type": "string",
-      "description": "Что произошло, одним-двумя предложениями простым языком",
-      "maxLength": 400
-    },
-    "rationale": {
-      "type": "string",
-      "description": "Почему выбрана такая серьёзность, со ссылкой на факты из текста",
-      "maxLength": 600
+      "description": "Дословный фрагмент текста, на котором держится запись. Код отбрасывает запись, если фрагмента нет в тексте",
+      "maxLength": 500
     },
     "confidence": {
       "type": "number",
+      "description": "Уверенность модели в компании и типе события; служебное поле, в сводке не показывается",
       "minimum": 0,
       "maximum": 1
     }
