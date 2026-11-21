@@ -45,7 +45,7 @@ CREATE TABLE bond_events (
 -- Исходные тексты
 CREATE TABLE texts (
     id           bigserial PRIMARY KEY,
-    source       text NOT NULL,          -- e_disclosure, rating_agency
+    source       text NOT NULL,          -- e_disclosure, rating_agency, news
     external_id  text,
     url          text NOT NULL,
     title        text,
@@ -101,14 +101,25 @@ CREATE TABLE positions (
     PRIMARY KEY (user_id, figi)
 );
 
--- Сводка инвестора на дату
-CREATE TABLE summaries (
+-- Уведомления: одна запись о выплатах, рейтинге или условиях по эмитенту из портфеля
+CREATE TABLE notifications (
     id         bigserial PRIMARY KEY,
     user_id    bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    for_date   date NOT NULL,
-    content    jsonb NOT NULL,           -- эмитенты, записи, доли, цены, точки выхода
+    record_id  bigint NOT NULL REFERENCES records (id) ON DELETE CASCADE,
+    content    jsonb NOT NULL,           -- запись, цитата, ссылка, выпуски инвестора, точка выхода
+    sent_at    timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (user_id, for_date)
+    UNIQUE (user_id, record_id)
+);
+
+-- Еженедельный отчёт инвестора
+CREATE TABLE weekly_reports (
+    id         bigserial PRIMARY KEY,
+    user_id    bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    week_start date NOT NULL,
+    content    jsonb NOT NULL,           -- строка на эмитента, точки выхода, доли, цены
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (user_id, week_start)
 );
 
 -- Отметки инвестора по записям сводки
@@ -123,7 +134,7 @@ CREATE TABLE feedback (
 -- Очередь задач (SELECT ... FOR UPDATE SKIP LOCKED)
 CREATE TABLE jobs (
     id         bigserial PRIMARY KEY,
-    kind       text NOT NULL,            -- fetch, extract, verify, refresh_directory, build_summary
+    kind       text NOT NULL,            -- fetch, extract, verify, refresh_directory, notify, build_weekly_report
     payload    jsonb NOT NULL,
     status     text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'failed')),
     attempts   int NOT NULL DEFAULT 0,
@@ -135,7 +146,7 @@ CREATE INDEX jobs_queue_idx ON jobs (kind, run_after) WHERE status = 'queued';
 -- Журнал вызовов MCP и отклонённых записей
 CREATE TABLE audit_log (
     id         bigserial PRIMARY KEY,
-    actor      text NOT NULL,            -- collector, extractor, verifier, summary, mcp
+    actor      text NOT NULL,            -- collector, extractor, verifier, notifier, report, mcp
     user_id    bigint REFERENCES users (id),
     operation  text NOT NULL,
     details    jsonb NOT NULL,
